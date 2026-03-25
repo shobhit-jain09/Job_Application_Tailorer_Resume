@@ -211,6 +211,9 @@ function truncateByChars(s, maxChars) {
 
 function normalizeText(s) {
   return (s || "")
+    // Handle escaped newlines coming from some clients/logging.
+    .replace(/\\r\\n/g, "\n")
+    .replace(/\\n/g, "\n")
     .replace(/\r\n/g, "\n")
     .replace(/[^\S\n]+/g, " ")
     .trim();
@@ -261,6 +264,159 @@ function extractEducationLines(resumeText) {
   const lines = normalizeText(resumeText).split("\n").map((l) => l.trim()).filter(Boolean);
   const edu = lines.filter((l) => /(university|college|bachelor|master|phd|degree|school)/i.test(l));
   return edu.slice(0, 6);
+}
+
+function extractContactBlock(resumeText) {
+  const lines = normalizeText(resumeText).split("\n").map((l) => l.trim()).filter(Boolean);
+  const first = lines.slice(0, 6);
+  const contactLike = first.filter((l) => /@|linkedin|github|\+?\d[\d\s().-]{6,}/i.test(l));
+  // Keep it short and ATS-safe.
+  return contactLike.slice(0, 3);
+}
+
+function splitLikelySkills(resumeText) {
+  const lines = normalizeText(resumeText).split("\n").map((l) => l.trim()).filter(Boolean);
+  const skills = new Map(); // lower -> canonical
+  for (const line of lines) {
+    // Heuristic: skills lines often have commas or pipes.
+    if (/(skills|core skills|technologies|tooling)/i.test(line) || /[,|•]/.test(line)) {
+      const parts = line
+        .replace(/^[-•*]\s*/, "")
+        .split(/[,|•]/g)
+        .map((p) => p.trim())
+        .filter((p) => p.length >= 2 && p.length <= 30);
+      for (const p of parts) {
+        // Filter obvious non-skill phrases.
+        if (/^(summary|experience|education)$/i.test(p)) continue;
+        if (/\s{2,}/.test(p)) continue;
+        if (p.split(" ").length > 4) continue;
+        const lower = p.toLowerCase();
+        if (!skills.has(lower)) skills.set(lower, p);
+      }
+    }
+    if (skills.size >= 40) break;
+  }
+  return Array.from(skills.values()).slice(0, 32);
+}
+
+function groupSkills(skills, preferredKeywords) {
+  const norm = (s) => String(s || "").trim();
+  const sLower = (s) => norm(s).toLowerCase();
+
+  const keep = new Set();
+  for (const kw of preferredKeywords || []) keep.add(sLower(kw));
+
+  const uniqMap = new Map();
+  for (const s of skills || []) {
+    const t = norm(s);
+    if (!t) continue;
+    const lower = t.toLowerCase();
+    if (!uniqMap.has(lower)) uniqMap.set(lower, t);
+  }
+
+  const ranked = Array.from(uniqMap.values())
+    .map((s) => ({ s, score: keep.has(sLower(s)) ? 2 : toolWords.has(sLower(s)) ? 1 : 0 }))
+    .sort((a, b) => b.score - a.score || a.s.localeCompare(b.s))
+    .map((x) => x.s);
+
+  const buckets = {
+    "Languages": [],
+    "Frameworks": [],
+    "Databases": [],
+    "Cloud / DevOps": [],
+    "Testing / Quality": [],
+    "Other": [],
+  };
+
+  for (const s of ranked) {
+    const l = sLower(s);
+    if (/(python|java|javascript|typescript|go|golang|c\+\+|c#|ruby|php|swift|kotlin)/i.test(l)) buckets["Languages"].push(s);
+    else if (/(react|next|node|express|django|flask|spring|dotnet|laravel)/i.test(l)) buckets["Frameworks"].push(s);
+    else if (/(postgres|postgresql|mysql|sql|mongodb|dynamodb|redis)/i.test(l)) buckets["Databases"].push(s);
+    else if (/(aws|gcp|azure|docker|kubernetes|terraform|ci\/cd|cicd|linux)/i.test(l)) buckets["Cloud / DevOps"].push(s);
+    else if (/(jest|cypress|selenium|testing|unit test|integration test|qa)/i.test(l)) buckets["Testing / Quality"].push(s);
+    else buckets["Other"].push(s);
+  }
+
+  // Remove empty buckets and cap sizes.
+  const out = [];
+  for (const [name, arr] of Object.entries(buckets)) {
+    const uniq = Array.from(new Set(arr));
+    if (!uniq.length) continue;
+    out.push({ name, items: uniq.slice(0, 10) });
+  }
+  return out;
+}
+
+function extractBulletLikeExperience(resumeText) {
+  const lines = normalizeText(resumeText).split("\n").map((l) => l.trim()).filter(Boolean);
+  const bullets = [];
+  for (const l of lines) {
+    const isBullet = /^[-•*]\s+/.test(l);
+    const looksLikeImpact = /\b(built|designed|implemented|improved|optimized|reduced|increased|delivered|led|migrated|automated)\b/i.test(
+      l,
+    );
+    if (isBullet || looksLikeImpact) {
+      const clean = l.replace(/^[-•*]\s+/, "");
+      if (clean.length >= 18) bullets.push(clean);
+    }
+    if (bullets.length >= 10) break;
+  }
+  return bullets;
+}
+
+function renderModernAtsResumeTemplate({
+  roleTitle,
+  company,
+  contactLines,
+  summaryLine,
+  skillGroups,
+  experienceBullets,
+  educationLines,
+  keywordLine,
+}) {
+  const parts = [];
+
+  // Top header (placeholders keep it usable while staying ATS-safe).
+  parts.push("[YOUR NAME]");
+  parts.push("[City, State]  |  [Phone]  |  [Email]  |  [LinkedIn]  |  [GitHub/Portfolio]");
+  if (contactLines?.length) {
+    parts.push(contactLines.join("  |  "));
+  }
+  parts.push("");
+
+  parts.push("TARGET ROLE");
+  parts.push(company ? `${roleTitle} (Target: ${company})` : `${roleTitle}`);
+  parts.push("");
+
+  parts.push("PROFESSIONAL SUMMARY");
+  parts.push(summaryLine);
+  if (keywordLine) parts.push(keywordLine);
+  parts.push("");
+
+  parts.push("KEY SKILLS");
+  if (skillGroups?.length) {
+    for (const g of skillGroups) {
+      parts.push(`${g.name}: ${g.items.join(", ")}`);
+    }
+  }
+  parts.push("");
+
+  parts.push("SELECTED IMPACT");
+  if (experienceBullets?.length) {
+    for (const b of experienceBullets.slice(0, 8)) parts.push(`- ${b}`);
+  } else {
+    parts.push("- Add 4–8 impact bullets here (pulled from your resume experience section).");
+  }
+  parts.push("");
+
+  if (educationLines?.length) {
+    parts.push("EDUCATION");
+    for (const e of educationLines.slice(0, 6)) parts.push(`- ${e}`);
+    parts.push("");
+  }
+
+  return parts.join("\n");
 }
 
 function extractExperienceEvidenceLines(resumeText, keywords, maxLines = 8) {
@@ -452,12 +608,24 @@ function tailorMock(resumeText, jobText) {
     else missing.push(kw);
   }
 
-  const roleLine = company ? `${roleTitle} role at ${company}` : `${roleTitle} role`;
+  const roleLine = company ? `${roleTitle} at ${company}` : `${roleTitle}`;
   const summaryKeywords = covered.slice(0, 10);
 
-  const skillLines = covered.length ? covered : topKeywords.slice(0, 10);
-  const experienceLines = extractExperienceEvidenceLines(resumeText, covered.length ? covered : allKeywords, 8);
+  const extractedSkills = splitLikelySkills(resumeText);
+  const prefer = covered.length ? covered : topKeywords.slice(0, 12);
+  const mergedSkills = Array.from(new Set([...(prefer || []), ...(extractedSkills || [])])).slice(0, 40);
+  const skillGroups = groupSkills(mergedSkills, prefer);
+
+  const experienceBullets = extractBulletLikeExperience(resumeText);
+  const experienceFallback = extractExperienceEvidenceLines(resumeText, covered.length ? covered : allKeywords, 8)
+    .map((l) => l.replace(/^[-•*]\s+/, ""))
+    .filter((l) => !/^(summary|core skills|professional experience|education)$/i.test(l));
+  const pickedBullets = (experienceBullets.length ? experienceBullets : experienceFallback).slice(0, 8);
   const educationLines = extractEducationLines(resumeText);
+  const contactLines = extractContactBlock(resumeText);
+
+  const summaryLine = `ATS-optimized ${roleLine} resume highlighting ${summaryKeywords.length ? summaryKeywords.join(", ") : "role-aligned skills"} proven in your experience.`;
+  const keywordLine = summaryKeywords.length ? `Focus keywords: ${summaryKeywords.join(", ")}.` : "";
 
   const keywordCoverage = [
     { name: "Tools & Technologies", covered: categorized.tools.filter((k) => resumeLower.includes(k.toLowerCase())), missing: categorized.tools.filter((k) => !resumeLower.includes(k.toLowerCase())) },
@@ -465,31 +633,16 @@ function tailorMock(resumeText, jobText) {
     { name: "Soft Skills", covered: categorized.soft.filter((k) => resumeLower.includes(k.toLowerCase())), missing: categorized.soft.filter((k) => !resumeLower.includes(k.toLowerCase())) },
   ];
 
-  const tailoredResumeParts = [];
-  tailoredResumeParts.push(`SUMMARY`);
-  tailoredResumeParts.push(
-    `ATS-targeted summary for ${roleLine}. Focused on ${summaryKeywords.length ? summaryKeywords.join(", ") : "relevant skills"} drawn directly from your resume.`
-  );
-  tailoredResumeParts.push("");
-
-  tailoredResumeParts.push(`CORE SKILLS`);
-  tailoredResumeParts.push(skillLines.map((k) => `- ${k}`).join("\n"));
-  tailoredResumeParts.push("");
-
-  tailoredResumeParts.push(`PROFESSIONAL EXPERIENCE`);
-  if (experienceLines.length) {
-    tailoredResumeParts.push(experienceLines.slice(0, 8).map((l) => (l.startsWith("-") ? l : `- ${l}`)).join("\n"));
-  } else {
-    // No evidence lines found: keep it safe and minimal.
-    tailoredResumeParts.push(`- Tailored bullets will be added once your resume includes role-relevant keywords (e.g., ${allKeywords.slice(0, 5).join(", ")}).`);
-  }
-  tailoredResumeParts.push("");
-
-  if (educationLines.length) {
-    tailoredResumeParts.push(`EDUCATION`);
-    tailoredResumeParts.push(educationLines.map((l) => `- ${l}`).join("\n"));
-    tailoredResumeParts.push("");
-  }
+  const tailoredResume = renderModernAtsResumeTemplate({
+    roleTitle,
+    company,
+    contactLines,
+    summaryLine,
+    skillGroups,
+    experienceBullets: pickedBullets,
+    educationLines,
+    keywordLine,
+  });
 
   // Cover letter
   const coveredLine = covered.length ? covered.slice(0, 10).join(", ") : topKeywords.slice(0, 10).join(", ");
@@ -508,7 +661,7 @@ function tailorMock(resumeText, jobText) {
   const coverLetter = `${firstParagraph}\n\n${secondParagraph}\n\n${thirdParagraph}\n\nSincerely,\n[Your Name]`;
 
   return {
-    tailoredResume: tailoredResumeParts.join("\n"),
+    tailoredResume,
     coverLetter,
     keywordCoverage: { groups: keywordCoverage },
     meta: { llmMode: "mock", roleTitle },
@@ -597,7 +750,15 @@ ${JSON.stringify(missingKeywords || [])}
 
 OUTPUT REQUIREMENTS
 - Output must be valid JSON.
-- tailoredResume must be plain text with headings: SUMMARY, CORE SKILLS, PROFESSIONAL EXPERIENCE, EDUCATION (if education exists in the resume).
+- tailoredResume must be plain text in a modern ATS template with these headings (verbatim):
+  - [YOUR NAME] (top line)
+  - TARGET ROLE
+  - PROFESSIONAL SUMMARY
+  - KEY SKILLS
+  - SELECTED IMPACT
+  - EDUCATION (only if education exists in the resume evidence)
+  Keep it one-page style. Use short lines and whitespace.
+- SELECTED IMPACT must contain 6–10 strong bullets written in modern style (action + scope + impact) but WITHOUT inventing metrics or tools.
 - coverLetter must be plain text, 3-4 short paragraphs, with "Dear Hiring Manager," and a sign-off.
 - ATS-safe: no tables, no markdown, no special formatting.
 - Safety: Do not invent employers, dates, degrees, certifications, metrics, or tools not supported by evidence snippets.
