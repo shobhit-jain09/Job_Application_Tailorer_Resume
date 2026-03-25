@@ -6,6 +6,10 @@ const els = {
   email: $("email"),
   activateBtn: $("activateBtn"),
   activationStatus: $("activationStatus"),
+  stripeSection: $("stripeSection"),
+  subscribeWeeklyBtn: $("subscribeWeeklyBtn"),
+  subscribeMonthlyBtn: $("subscribeMonthlyBtn"),
+  subscribeStatus: $("subscribeStatus"),
   resumeText: $("resumeText"),
   jobText: $("jobText"),
   tailorBtn: $("tailorBtn"),
@@ -169,8 +173,59 @@ async function tailerNow() {
 els.activateBtn.addEventListener("click", activateDemo);
 els.tailorBtn.addEventListener("click", tailerNow);
 
+async function loadStripeConfig() {
+  try {
+    const res = await fetch("/api/billing/stripe-config", { method: "GET" });
+    const data = await res.json();
+    if (!data?.enabled) return;
+
+    els.stripeSection.style.display = "block";
+    els.subscribeWeeklyBtn.disabled = false;
+    els.subscribeMonthlyBtn.disabled = false;
+    els.subscribeWeeklyBtn.textContent = data.plans.weekly.label;
+    els.subscribeMonthlyBtn.textContent = data.plans.monthly.label;
+  } catch {
+    // Keep demo-only UX on failures.
+  }
+}
+
+async function subscribe(plan) {
+  const email = els.email.value.trim();
+  if (!email) {
+    alert("Enter your email first.");
+    return;
+  }
+
+  els.subscribeStatus.textContent = `Redirecting to Stripe checkout (${plan})...`;
+  els.subscribeWeeklyBtn.disabled = true;
+  els.subscribeMonthlyBtn.disabled = true;
+
+  try {
+    const res = await fetch("/api/billing/create-checkout-session", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email, plan }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data?.error || "Checkout session failed");
+    if (!data?.url) throw new Error("Missing checkout URL");
+
+    window.location.href = data.url;
+  } catch (err) {
+    els.subscribeStatus.textContent = `Error: ${err.message}`;
+    els.subscribeWeeklyBtn.disabled = false;
+    els.subscribeMonthlyBtn.disabled = false;
+  }
+}
+
+els.subscribeWeeklyBtn?.addEventListener("click", () => subscribe("weekly"));
+els.subscribeMonthlyBtn?.addEventListener("click", () => subscribe("monthly"));
+
 // Auto-fill with example text for first-run demo.
 setExampleInputs();
+
+// Show Stripe UI only when Stripe is configured on the backend.
+loadStripeConfig();
 
 // If we previously activated for the current email, show status.
 {

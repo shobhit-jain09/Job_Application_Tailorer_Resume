@@ -79,6 +79,7 @@ async function upsertMockSubscriptionFromEmail(db, email) {
 module.exports = {
   getDb,
   getSubscription,
+  upsertSubscription,
   upsertMockSubscriptionFromEmail,
 };
 

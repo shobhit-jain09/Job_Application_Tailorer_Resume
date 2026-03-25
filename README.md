@@ -32,3 +32,10 @@ Create a `.env` file with:
 - `OPENAI_MODEL` (optional; default `gpt-4o-mini`)
 - `STRIPE_MOCK` (optional; if `true`, generation bypasses the paywall gate)
 - `PORT` (optional; default `3000`)
+- Stripe (for real paywall)
+  - `STRIPE_SECRET_KEY`
+  - `STRIPE_WEBHOOK_SECRET`
+  - `STRIPE_PRICE_WEEKLY_ID`
+  - `STRIPE_PRICE_MONTHLY_ID`
+  - `STRIPE_SUCCESS_URL`
+  - `STRIPE_CANCEL_URL`
