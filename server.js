@@ -7,6 +7,7 @@ const cookieParser = require("cookie-parser");
 const dotenv = require("dotenv");
 const { z } = require("zod");
 const Stripe = require("stripe");
+const multer = require("multer");
 
 const { getDb } = require("./src/db");
 const {
@@ -16,6 +17,7 @@ const {
 } = require("./src/paywall");
 const { tailorResumeAndCoverLetter } = require("./src/tailor");
 const { streamTextAsPdf } = require("./src/pdfExport");
+const { parseResumeBuffer } = require("./src/resumeParse");
 
 dotenv.config();
 
@@ -42,6 +44,13 @@ app.use(cookieParser());
 
 app.use(express.static(path.join(__dirname, "public")));
 
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: {
+    fileSize: 8 * 1024 * 1024, // 8MB
+  },
+});
+
 const stripe = process.env.STRIPE_SECRET_KEY
   ? new Stripe(process.env.STRIPE_SECRET_KEY, {
       apiVersion: process.env.STRIPE_API_VERSION || "2024-06-20",
@@ -58,6 +67,11 @@ const generationLimiter = rateLimit({
 
 const tailorBodySchema = z.object({
   resumeText: z.string().min(50).max(40000),
+  jobText: z.string().min(50).max(20000),
+  email: z.string().email().optional(),
+});
+
+const tailorUploadFieldsSchema = z.object({
   jobText: z.string().min(50).max(20000),
   email: z.string().email().optional(),
 });
@@ -106,6 +120,63 @@ app.post("/api/tailor", generationLimiter, async (req, res) => {
     return res.status(500).json({ error: "SERVER_ERROR" });
   }
 });
+
+app.post(
+  "/api/tailor-upload",
+  generationLimiter,
+  upload.single("resume"),
+  async (req, res) => {
+    try {
+      const fields = tailorUploadFieldsSchema.parse(req.body);
+      const email = fields.email;
+      const db = getDb();
+
+      const tierInfo = email ? await getSubscriptionForEmail(db, email) : null;
+      const okToGenerate = await shouldAllowGeneration({
+        stripeMock: process.env.STRIPE_MOCK === "true",
+        hasEmail: Boolean(email),
+        tierInfo,
+      });
+
+      if (!okToGenerate) {
+        return res.status(402).json({
+          error: "PAYWALL_REQUIRED",
+          message: "Active subscription required to generate tailored outputs.",
+        });
+      }
+
+      if (!req.file) {
+        return res.status(400).json({ error: "MISSING_FILE", message: "Upload a resume PDF/DOCX." });
+      }
+
+      const parsed = await parseResumeBuffer({
+        buffer: req.file.buffer,
+        originalname: req.file.originalname,
+        mimetype: req.file.mimetype,
+      });
+
+      const result = await tailorResumeAndCoverLetter({
+        resumeText: parsed.text,
+        jobText: fields.jobText,
+        email,
+      });
+
+      return res.json({
+        ...result,
+        meta: {
+          ...(result.meta || {}),
+          resumeSource: `upload:${parsed.kind}`,
+        },
+      });
+    } catch (err) {
+      if (err?.name === "ZodError") {
+        return res.status(400).json({ error: "INVALID_INPUT", details: err.issues });
+      }
+      console.error(err);
+      return res.status(500).json({ error: "SERVER_ERROR", message: err?.message || "Server error" });
+    }
+  },
+);
 
 app.post("/api/export/resume-pdf", async (req, res) => {
   try {

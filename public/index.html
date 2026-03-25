@@ -36,10 +36,16 @@
       </section>
 
       <section class="card">
-        <h2>2) Paste Your Inputs</h2>
+        <h2>2) Provide Your Inputs</h2>
         <div class="row">
           <label>
-            Master Resume (paste text)
+            Upload Master Resume (PDF or DOCX)
+            <input id="resumeFile" type="file" accept=".pdf,.docx,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document" />
+          </label>
+        </div>
+        <div class="row">
+          <label>
+            Or paste Master Resume (text)
             <textarea id="resumeText" rows="12"></textarea>
           </label>
         </div>

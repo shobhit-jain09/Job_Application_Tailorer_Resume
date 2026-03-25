@@ -10,6 +10,7 @@ const els = {
   subscribeWeeklyBtn: $("subscribeWeeklyBtn"),
   subscribeMonthlyBtn: $("subscribeMonthlyBtn"),
   subscribeStatus: $("subscribeStatus"),
+  resumeFile: $("resumeFile"),
   resumeText: $("resumeText"),
   jobText: $("jobText"),
   tailorBtn: $("tailorBtn"),
@@ -130,11 +131,12 @@ function setExampleInputs() {
 
 async function tailerNow() {
   const resumeText = els.resumeText.value.trim();
+  const resumeFile = els.resumeFile?.files?.[0] || null;
   const jobText = els.jobText.value.trim();
   const email = els.email.value.trim();
 
-  if (!resumeText || resumeText.length < 50) {
-    alert("Paste your master resume text first.");
+  if (!resumeFile && (!resumeText || resumeText.length < 50)) {
+    alert("Upload your resume (PDF/DOCX) or paste your resume text first.");
     return;
   }
   if (!jobText || jobText.length < 50) {
@@ -157,11 +159,20 @@ async function tailerNow() {
   setResults({ tailoredResume: "", coverLetter: "", keywordCoverage: null });
 
   try {
-    const res = await fetch("/api/tailor", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ resumeText, jobText, email }),
-    });
+    let res;
+    if (resumeFile) {
+      const form = new FormData();
+      form.append("resume", resumeFile);
+      form.append("jobText", jobText);
+      form.append("email", email);
+      res = await fetch("/api/tailor-upload", { method: "POST", body: form });
+    } else {
+      res = await fetch("/api/tailor", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ resumeText, jobText, email }),
+      });
+    }
     const data = await res.json();
 
     if (!res.ok) {
