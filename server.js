@@ -15,6 +15,7 @@ const {
   upsertMockSubscriptionFromEmail,
 } = require("./src/paywall");
 const { tailorResumeAndCoverLetter } = require("./src/tailor");
+const { streamTextAsPdf } = require("./src/pdfExport");
 
 dotenv.config();
 
@@ -61,6 +62,10 @@ const tailorBodySchema = z.object({
   email: z.string().email().optional(),
 });
 
+const exportBodySchema = z.object({
+  text: z.string().min(1).max(500000),
+});
+
 app.get("/health", (req, res) => {
   res.json({ ok: true });
 });
@@ -93,6 +98,32 @@ app.post("/api/tailor", generationLimiter, async (req, res) => {
     });
 
     return res.json(result);
+  } catch (err) {
+    if (err?.name === "ZodError") {
+      return res.status(400).json({ error: "INVALID_INPUT", details: err.issues });
+    }
+    console.error(err);
+    return res.status(500).json({ error: "SERVER_ERROR" });
+  }
+});
+
+app.post("/api/export/resume-pdf", async (req, res) => {
+  try {
+    const body = exportBodySchema.parse(req.body);
+    streamTextAsPdf(res, body.text, "tailored-resume.pdf");
+  } catch (err) {
+    if (err?.name === "ZodError") {
+      return res.status(400).json({ error: "INVALID_INPUT", details: err.issues });
+    }
+    console.error(err);
+    return res.status(500).json({ error: "SERVER_ERROR" });
+  }
+});
+
+app.post("/api/export/cover-letter-pdf", async (req, res) => {
+  try {
+    const body = exportBodySchema.parse(req.body);
+    streamTextAsPdf(res, body.text, "cover-letter.pdf");
   } catch (err) {
     if (err?.name === "ZodError") {
       return res.status(400).json({ error: "INVALID_INPUT", details: err.issues });

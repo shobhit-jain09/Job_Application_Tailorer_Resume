@@ -25,16 +25,32 @@ function setBusy(text) {
   els.busy.textContent = text || "";
 }
 
-function downloadText(filename, text) {
-  const blob = new Blob([text], { type: "text/plain;charset=utf-8" });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = filename;
-  document.body.appendChild(a);
-  a.click();
-  a.remove();
-  setTimeout(() => URL.revokeObjectURL(url), 1000);
+async function downloadPdf(endpoint, filename, text) {
+  setBusy("Generating PDF...");
+  try {
+    const res = await fetch(endpoint, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ text }),
+    });
+
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      throw new Error(data?.error || "PDF export failed");
+    }
+
+    const blob = await res.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  } finally {
+    setBusy("");
+  }
 }
 
 function setResults({ tailoredResume, coverLetter, keywordCoverage }) {
@@ -172,6 +188,22 @@ async function tailerNow() {
 
 els.activateBtn.addEventListener("click", activateDemo);
 els.tailorBtn.addEventListener("click", tailerNow);
+
+els.downloadResumeBtn.addEventListener("click", async () => {
+  await downloadPdf(
+    "/api/export/resume-pdf",
+    "tailored-resume.pdf",
+    els.tailoredResume.value || ""
+  );
+});
+
+els.downloadCoverBtn.addEventListener("click", async () => {
+  await downloadPdf(
+    "/api/export/cover-letter-pdf",
+    "cover-letter.pdf",
+    els.coverLetter.value || ""
+  );
+});
 
 async function loadStripeConfig() {
   try {
