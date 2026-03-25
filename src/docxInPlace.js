@@ -16,6 +16,7 @@ try {
 }
 
 const W_NS = "http://schemas.openxmlformats.org/wordprocessingml/2006/main";
+const selectW = xpath.useNamespaces({ w: W_NS });
 
 function normalizeLine(s) {
   return String(s || "")
@@ -25,18 +26,18 @@ function normalizeLine(s) {
 }
 
 function paragraphText(p) {
-  const nodes = xpath.select(".//w:t", p);
+  const nodes = selectW(".//w:t", p);
   const text = nodes.map((n) => n.textContent || "").join("");
   return normalizeLine(text);
 }
 
 function paragraphHasNumbering(p) {
-  const numPr = xpath.select(".//w:numPr", p);
+  const numPr = selectW(".//w:numPr", p);
   return Boolean(numPr && numPr.length);
 }
 
 function setParagraphText(doc, p, text) {
-  const tNodes = xpath.select(".//w:t", p);
+  const tNodes = selectW(".//w:t", p);
   const safe = String(text ?? "");
 
   if (tNodes.length > 0) {
@@ -193,9 +194,7 @@ async function applyTailoringToDocxTemplate({ docxBuffer, tailoredResumeText }) 
 
   const parser = new DOMParser();
   const doc = parser.parseFromString(docXml, "application/xml");
-  const select = xpath.useNamespaces({ w: W_NS });
-
-  const paragraphs = select("//w:p", doc);
+  const paragraphs = selectW("//w:p", doc);
   if (!paragraphs?.length) throw new Error("No paragraphs found in DOCX");
 
   const content = parseTailoredResumeSections(tailoredResumeText);
