@@ -1,6 +1,19 @@
-const JSZip = require("jszip");
-const { DOMParser, XMLSerializer } = require("@xmldom/xmldom");
-const xpath = require("xpath");
+let JSZip;
+let DOMParser;
+let XMLSerializer;
+let xpath;
+
+try {
+  JSZip = require("jszip");
+  ({ DOMParser, XMLSerializer } = require("@xmldom/xmldom"));
+  xpath = require("xpath");
+} catch (err) {
+  const missing = err?.code === "MODULE_NOT_FOUND" ? err?.message : String(err?.message || err);
+  throw new Error(
+    `DOCX in-place tailoring dependencies missing. Run "npm install" in the project root.\n` +
+      `Original error: ${missing}`,
+  );
+}
 
 const W_NS = "http://schemas.openxmlformats.org/wordprocessingml/2006/main";
 

@@ -18,7 +18,14 @@ const {
 const { tailorResumeAndCoverLetter } = require("./src/tailor");
 const { streamTextAsPdf } = require("./src/pdfExport");
 const { parseResumeBuffer } = require("./src/resumeParse");
-const { applyTailoringToDocxTemplate } = require("./src/docxInPlace");
+let applyTailoringToDocxTemplate = null;
+try {
+  ({ applyTailoringToDocxTemplate } = require("./src/docxInPlace"));
+} catch (err) {
+  // Allow server to start even if DOCX in-place deps aren't installed in a fresh checkout.
+  console.warn(String(err?.message || err));
+  applyTailoringToDocxTemplate = null;
+}
 
 dotenv.config();
 
@@ -215,6 +222,12 @@ app.post(
   upload.single("resume"),
   async (req, res) => {
     try {
+      if (!applyTailoringToDocxTemplate) {
+        return res.status(503).json({
+          error: "DOCX_EXPORT_UNAVAILABLE",
+          message: 'DOCX export is unavailable. Run "npm install" then restart the server.',
+        });
+      }
       const fields = exportDocxFieldsSchema.parse(req.body);
 
       if (!req.file) {
