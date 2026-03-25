@@ -19,6 +19,7 @@ const els = {
   coverLetter: $("coverLetter"),
   keywordCoverage: $("keywordCoverage"),
   downloadResumeBtn: $("downloadResumeBtn"),
+  downloadResumeDocxBtn: $("downloadResumeDocxBtn"),
   downloadCoverBtn: $("downloadCoverBtn"),
 };
 
@@ -60,6 +61,10 @@ function setResults({ tailoredResume, coverLetter, keywordCoverage }) {
   els.keywordCoverage.textContent = keywordCoverage ? JSON.stringify(keywordCoverage, null, 2) : "";
 
   els.downloadResumeBtn.disabled = !tailoredResume;
+  // DOCX download only enabled when user uploaded a DOCX.
+  const uploaded = els.resumeFile?.files?.[0] || null;
+  const isDocx = uploaded?.name?.toLowerCase?.().endsWith(".docx");
+  els.downloadResumeDocxBtn.disabled = !(tailoredResume && isDocx);
   els.downloadCoverBtn.disabled = !coverLetter;
 }
 
@@ -206,6 +211,45 @@ els.downloadResumeBtn.addEventListener("click", async () => {
     "tailored-resume.pdf",
     els.tailoredResume.value || ""
   );
+});
+
+els.downloadResumeDocxBtn.addEventListener("click", async () => {
+  const uploaded = els.resumeFile?.files?.[0] || null;
+  if (!uploaded || !uploaded.name.toLowerCase().endsWith(".docx")) {
+    alert("Upload a DOCX resume to download an in-place tailored DOCX.");
+    return;
+  }
+  if (!els.tailoredResume.value || els.tailoredResume.value.length < 50) {
+    alert("Generate a tailored resume first.");
+    return;
+  }
+
+  setBusy("Generating DOCX...");
+  try {
+    const form = new FormData();
+    form.append("resume", uploaded);
+    form.append("tailoredResume", els.tailoredResume.value);
+
+    const res = await fetch("/api/export/resume-docx", { method: "POST", body: form });
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      throw new Error(data?.message || data?.error || "DOCX export failed");
+    }
+
+    const blob = await res.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "tailored-resume.docx";
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  } catch (err) {
+    alert(`Error: ${err.message}`);
+  } finally {
+    setBusy("");
+  }
 });
 
 els.downloadCoverBtn.addEventListener("click", async () => {

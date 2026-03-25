@@ -18,6 +18,7 @@ const {
 const { tailorResumeAndCoverLetter } = require("./src/tailor");
 const { streamTextAsPdf } = require("./src/pdfExport");
 const { parseResumeBuffer } = require("./src/resumeParse");
+const { applyTailoringToDocxTemplate } = require("./src/docxInPlace");
 
 dotenv.config();
 
@@ -78,6 +79,10 @@ const tailorUploadFieldsSchema = z.object({
 
 const exportBodySchema = z.object({
   text: z.string().min(1).max(500000),
+});
+
+const exportDocxFieldsSchema = z.object({
+  tailoredResume: z.string().min(50).max(500000),
 });
 
 app.get("/health", (req, res) => {
@@ -203,6 +208,44 @@ app.post("/api/export/cover-letter-pdf", async (req, res) => {
     return res.status(500).json({ error: "SERVER_ERROR" });
   }
 });
+
+// Export: keep the user's DOCX template and apply the tailored content in-place.
+app.post(
+  "/api/export/resume-docx",
+  upload.single("resume"),
+  async (req, res) => {
+    try {
+      const fields = exportDocxFieldsSchema.parse(req.body);
+
+      if (!req.file) {
+        return res.status(400).json({ error: "MISSING_FILE", message: "Upload a DOCX resume." });
+      }
+
+      const name = String(req.file.originalname || "").toLowerCase();
+      if (!name.endsWith(".docx")) {
+        return res.status(400).json({ error: "UNSUPPORTED_FILE", message: "DOCX required for in-place tailoring." });
+      }
+
+      const updated = await applyTailoringToDocxTemplate({
+        docxBuffer: req.file.buffer,
+        tailoredResumeText: fields.tailoredResume,
+      });
+
+      res.setHeader(
+        "Content-Type",
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      );
+      res.setHeader("Content-Disposition", 'attachment; filename="tailored-resume.docx"');
+      return res.status(200).send(updated);
+    } catch (err) {
+      if (err?.name === "ZodError") {
+        return res.status(400).json({ error: "INVALID_INPUT", details: err.issues });
+      }
+      console.error(err);
+      return res.status(500).json({ error: "SERVER_ERROR", message: err?.message || "Server error" });
+    }
+  },
+);
 
 // Simple paywall helper for local demos: user submits email, we mark it as "trial/premium" in SQLite.
 app.post("/api/billing/mock-activate", async (req, res) => {
